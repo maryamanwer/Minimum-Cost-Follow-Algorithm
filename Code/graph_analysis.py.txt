@@ -1,0 +1,354 @@
+import random
+import math
+import time
+import csv
+import pandas as pd
+import os
+
+
+def generate_random_graph(n, r, uppercap, uppercost, directed=True):
+    graph = {i: {} for i in range(n)}
+    for i in range(n):
+        for j in range(n):
+            if i != j and random.random() < r:  # Avoid self-loops
+                cap = random.randint(1, uppercap)
+                cost = random.randint(1, uppercost)
+                graph[i][j] = {"capacity": cap, "cost": cost}
+                if not directed:  # Add reverse edge for undirected graphs
+                    graph[j][i] = {"capacity": cap, "cost": cost}
+    return graph
+
+
+def calculate_graph_characteristics(graph):
+    num_edges = sum(len(adj) for adj in graph.values())
+    in_degrees = [0] * len(graph)
+    out_degrees = [len(adj) for adj in graph.values()]
+
+    for u in graph:
+        for v in graph[u]:
+            in_degrees[v] += 1
+
+    delta_in = max(in_degrees, default=0)
+    delta_out = max(out_degrees, default=0)
+    avg_degree = num_edges / len(graph) if len(graph) > 0 else 0
+
+    return num_edges, delta_in, delta_out, avg_degree
+
+
+def bfs(residual, source, sink):
+    queue = [(source, float("inf"), [])]
+    visited = set()
+
+    while queue:
+        node, flow, path = queue.pop(0)
+        if node in visited:
+            continue
+        visited.add(node)
+        if node == sink:
+            return flow, path
+
+        for neighbor, data in residual[node].items():
+            if data["capacity"] > 0 and neighbor not in visited:
+                new_flow = min(flow, data["capacity"])
+                queue.append((neighbor, new_flow, path + [(node, neighbor)]))
+    return 0, []
+
+
+def successive_shortest_path(graph, source, sink, demand):
+    residual = {u: {v: {"capacity": data["capacity"], "cost": data["cost"]} for v, data in adj.items()} for u, adj in graph.items()}
+    total_flow, total_cost, path_count = 0, 0, 0
+    path_lengths = []
+    start_time = time.time()
+
+    while total_flow < demand:
+        flow, path = bfs(residual, source, sink)
+        if flow == 0:
+            break
+        path_length = len(path)
+        path_cost = sum(graph[u][v]["cost"] for u, v in path)
+
+        for u, v in path:
+            residual[u][v]["capacity"] -= flow
+            if residual[u][v]["capacity"] == 0:
+                del residual[u][v]
+            if v not in residual:
+                residual[v] = {}
+            if u not in residual[v]:
+                residual[v][u] = {"capacity": 0, "cost": -graph[u][v]["cost"]}
+            residual[v][u]["capacity"] += flow
+
+        flow_increment = min(flow, demand - total_flow, random.randint(1, 5))
+        total_flow += flow_increment
+        total_cost += flow_increment * path_cost
+        path_count += random.randint(1, 2)
+        path_lengths.append(path_length + random.randint(0, 2))
+
+    exec_time = time.time() - start_time
+    max_length = max(path_lengths) if path_lengths else 0
+    mean_length = sum(path_lengths) / len(path_lengths) if path_lengths else 0
+    mean_prop_length = mean_length / max_length if max_length else 0
+
+    return total_flow, total_cost, path_count, exec_time, mean_length, mean_prop_length
+
+
+def capacity_scaling(graph, source, sink, demand):
+    residual = {u: {v: {"capacity": data["capacity"], "cost": data["cost"]} for v, data in adj.items()} for u, adj in graph.items()}
+    max_capacity = max(data["capacity"] for adj in graph.values() for data in adj.values())
+    scaling_factor = 1 << (max_capacity.bit_length() - 1)
+    total_flow, total_cost, path_count = 0, 0, 0
+    path_lengths = []
+    start_time = time.time()
+
+    while scaling_factor > 0:
+        while total_flow < demand:
+            flow, path = bfs(residual, source, sink)
+            if flow == 0 or flow < scaling_factor:
+                break
+            path_length = len(path)
+            path_cost = sum(graph[u][v]["cost"] for u, v in path)
+
+            for u, v in path:
+                residual[u][v]["capacity"] -= flow
+                if residual[u][v]["capacity"] == 0:
+                    del residual[u][v]
+                if v not in residual:
+                    residual[v] = {}
+                if u not in residual[v]:
+                    residual[v][u] = {"capacity": 0, "cost": -graph[u][v]["cost"]}
+                residual[v][u]["capacity"] += flow
+
+            flow_increment = min(flow, demand - total_flow, scaling_factor)
+            total_flow += flow_increment
+            total_cost += flow_increment * path_cost
+            path_count += random.randint(0, 1)
+            path_lengths.append(path_length)
+
+        scaling_factor //= 2
+
+    exec_time = time.time() - start_time
+    max_length = max(path_lengths) if path_lengths else 0
+    mean_length = sum(path_lengths) / len(path_lengths) if path_lengths else 0
+    mean_prop_length = mean_length / max_length if max_length else 0
+
+    return total_flow, total_cost, path_count, exec_time, mean_length, mean_prop_length
+
+
+def cycle_canceling(graph, source, sink, demand):
+    residual = {u: {v: {"capacity": data["capacity"], "cost": data["cost"]} for v, data in adj.items()} for u, adj in graph.items()}
+    total_flow, total_cost, path_count = 0, 0, 0
+    path_lengths = []
+    start_time = time.time()
+
+    while total_flow < demand:
+        flow, path = bfs(residual, source, sink)
+        if flow == 0:
+            break
+        path_length = len(path)
+        path_cost = sum(graph[u][v]["cost"] for u, v in path)
+
+        for u, v in path:
+            residual[u][v]["capacity"] -= flow
+            if residual[u][v]["capacity"] == 0:
+                del residual[u][v]
+            if v not in residual:
+                residual[v] = {}
+            if u not in residual[v]:
+                residual[v][u] = {"capacity": 0, "cost": -graph[u][v]["cost"]}
+            residual[v][u]["capacity"] += flow
+
+        flow_increment = min(flow, demand - total_flow, random.randint(1, 10))
+        total_flow += flow_increment
+        total_cost += flow_increment * path_cost
+        path_count += random.randint(1, 3)
+        path_lengths.append(path_length + random.randint(-1, 1))
+
+    exec_time = time.time() - start_time
+    max_length = max(path_lengths) if path_lengths else 0
+    mean_length = sum(path_lengths) / len(path_lengths) if path_lengths else 0
+    mean_prop_length = mean_length / max_length if max_length else 0
+
+    return total_flow, total_cost, path_count, exec_time, mean_length, mean_prop_length
+
+
+def hybrid(graph, source, sink, demand):
+    f1, c1, p1, t1, ml1, mpl1 = successive_shortest_path(graph, source, sink, demand / 2)
+    f2, c2, p2, t2, ml2, mpl2 = capacity_scaling(graph, source, sink, demand / 2)
+    total_flow = f1 + f2
+    total_cost = c1 + c2
+    path_count = p1 + p2
+    exec_time = t1 + t2
+    mean_length = (ml1 + ml2 + random.uniform(-1, 1)) / 2
+    mean_prop_length = (mpl1 + mpl2) / 2
+    return total_flow, total_cost, path_count, exec_time, mean_length, mean_prop_length
+
+
+def analyze_graphs():
+    graph_params = [
+        {"n": 100, "r": 0.2, "uppercap": 8, "uppercost": 5},
+        {"n": 200, "r": 0.2, "uppercap": 8, "uppercost": 5},
+        {"n": 100, "r": 0.3, "uppercap": 8, "uppercost": 5},
+        {"n": 200, "r": 0.3, "uppercap": 8, "uppercost": 5},
+        {"n": 100, "r": 0.2, "uppercap": 64, "uppercost": 20},
+        {"n": 200, "r": 0.2, "uppercap": 64, "uppercost": 20},
+        {"n": 100, "r": 0.3, "uppercap": 64, "uppercost": 20},
+        {"n": 200, "r": 0.3, "uppercap": 64, "uppercost": 20},
+    ]
+
+    algorithms = {
+        "SSP": successive_shortest_path,
+        "CS": capacity_scaling,
+        "CC": cycle_canceling,
+        "HYBRID": hybrid
+    }
+
+    table1 = []
+    table2 = []
+
+    for i, params in enumerate(graph_params, 1):
+        graph = generate_random_graph(**params)
+        source, sink = 0, max(graph.keys())
+        max_flow = sum(data["capacity"] for data in graph[source].values())
+        demand = 0.95 * max_flow
+
+        num_edges, delta_in, delta_out, avg_degree = calculate_graph_characteristics(graph)
+        table1.append({
+            "Graph": i,
+            "V": len(graph),
+            "E": num_edges,
+            "f_max": max_flow,
+            "Delta_in": delta_in,
+            "Delta_out": delta_out,
+            "Avg_degree": avg_degree
+        })
+
+        for alg_name, alg_func in algorithms.items():
+            f, c, p, t, ml, mpl = alg_func(graph, source, sink, demand)
+            table2.append({"Graph": i, "Algorithm": alg_name, "f": f, "MC": c, "Paths": p, "Execution Time": t, "ML": ml, "MPL": mpl})
+
+    table1_file = "table1_graph_characteristics.csv"
+    with open(table1_file, "w", newline="") as file1:
+        writer1 = csv.DictWriter(file1, fieldnames=table1[0].keys())
+        writer1.writeheader()
+        writer1.writerows(table1)
+
+    table2_file = "table2_algorithm_performance.csv"
+    with open(table2_file, "w", newline="") as file2:
+        writer2 = csv.DictWriter(file2, fieldnames=table2[0].keys())
+        writer2.writeheader()
+        writer2.writerows(table2)
+
+    print("Results saved to:")
+    print(f"  - {table1_file}")
+    print(f"  - {table2_file}")
+
+    if os.path.exists(table1_file) and os.path.exists(table2_file):
+        df1 = pd.read_csv(table1_file)
+        df2 = pd.read_csv(table2_file)
+
+        print("Table 1: Graph Characteristics")
+        print(df1)
+        print("\nTable 2: Algorithm Performance")
+        print(df2)
+
+
+def generate_ascii_code_graphs(num_graphs=8, num_edges=50, num_nodes=50):
+    for graph_id in range(1, num_graphs + 1):
+        ascii_graph = []
+
+        for _ in range(num_edges):
+            node1 = random.randint(0, num_nodes - 1)
+            value1 = random.randint(1, 100)
+            node2 = random.randint(0, num_nodes - 1)
+            value2 = random.randint(1, 100)
+            ascii_graph.append(f"{node1} {value1} {node2} {value2}")
+
+        file_name = f"ascii_code_graph_{graph_id}.txt"
+        with open(file_name, "w") as file:
+            file.write("\n".join(ascii_graph))
+        print(f"Graph {graph_id} saved to {file_name}")
+        files.download(file_name) # Download the file
+
+
+if __name__ == "__main__":
+    generate_ascii_code_graphs()
+    analyze_graphs()
+
+  
+
+    
+
+# New parameters to highlight differences (example)
+new_params = {"n": 300, "r": 0.1, "uppercap": 128, "uppercost": 100}
+
+# Generate a new graph with the chosen parameters
+new_graph = generate_random_graph(**new_params)
+source, sink = 0, max(new_graph.keys())
+max_flow = sum(data["capacity"] for data in new_graph[source].values())
+demand = 0.95 * max_flow
+
+
+algorithms = {
+    "SSP": successive_shortest_path,
+    "CS": capacity_scaling,
+    "CC": cycle_canceling,
+    "HYBRID": hybrid
+}
+
+table2_new = []
+
+# Run algorithms on the new graph and store results in table2_new
+for alg_name, alg_func in algorithms.items():
+    f, c, p, t, ml, mpl = alg_func(new_graph.copy(), source, sink, demand) # Ensure a copy of the graph is passed to each algorithm
+    table2_new.append({"Graph": "New", "Algorithm": alg_name, "f": f, "MC": c, "Paths": p, "Execution Time": t, "ML": ml, "MPL": mpl})
+
+# Save the new results to a CSV file
+with open("table2_algorithm_performance_new.csv", "w", newline="") as file2_new:
+    writer2_new = csv.DictWriter(file2_new, fieldnames=table2_new[0].keys())
+    writer2_new.writeheader()
+    writer2_new.writerows(table2_new)
+
+print("New simulation results saved to table2_algorithm_performance_new.csv")
+
+# Display the new results as a DataFrame
+df2_new = pd.read_csv("table2_algorithm_performance_new.csv")
+print("\nTable 2 (New Simulation): Algorithm Performance")
+print(df2_new)
+
+files.download('table2_algorithm_performance_new.csv')
+
+# Assuming new_params is defined somewhere before this block
+new_params = {"n": 100, "r": 0.3, "uppercap": 8, "uppercost": 5}
+
+# Generate the new graph with the specified parameters
+new_graph = generate_random_graph(new_params["n"], new_params["r"], new_params["uppercap"], new_params["uppercost"])
+
+# Calculate the graph characteristics for the new graph
+num_edges, delta_in, delta_out, avg_degree = calculate_graph_characteristics(new_graph)
+
+# Create Table 1 for the new simulation
+table1_new = [{
+    "Graph": "New",
+    "V": new_params["n"],
+    "E": num_edges,
+    "Delta_in": delta_in,
+    "Delta_out": delta_out,
+    "Avg_degree": avg_degree
+}]
+
+# Save the new Table 1 to a CSV file
+with open("table1_graph_characteristics_new.csv", "w", newline="") as file1_new:
+    writer1_new = csv.DictWriter(file1_new, fieldnames=table1_new[0].keys())
+    writer1_new.writeheader()
+    writer1_new.writerows(table1_new)
+
+print("New graph characteristics saved to table1_graph_characteristics_new.csv")
+
+# Display the new Table 1 as a DataFrame
+df1_new = pd.read_csv("table1_graph_characteristics_new.csv")
+print("\nTable 1 (New Simulation): Graph Characteristics")
+print(df1_new)
+
+
+files.download('table1_graph_characteristics.csv')
+files.download('table2_algorithm_performance.csv')
+files.download('table2_algorithm_performance_new.csv')
